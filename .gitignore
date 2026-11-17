@@ -1,0 +1,10 @@
+# Build output
+/Source/bin/
+/Source/obj/
+/.vs/
+*.user
+*.pdb
+
+# Legacy icon locations (not used for buffs)
+/ItemIcons/
+/Resources/UIAtlases/ItemIconAtlas/

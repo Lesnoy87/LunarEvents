@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<buffs>
+  <append xpath="/buffs">
+
+    <!-- ===== Базовые фазы: 0..7, ночь 22:00-04:00 ===== -->
+
+    <buff name="lunar_xp_up" name_key="lunar_xp_upName" description_key="lunar_xp_upDesc" icon="ui_game_symbol_lunar_xp_up">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="PlayerExpGain" operation="perc_add" value="0.10"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_speed_up" name_key="lunar_speed_upName" description_key="lunar_speed_upDesc" icon="ui_game_symbol_lunar_speed_up">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="RunSpeed" operation="perc_add" value="0.10"/>
+        <passive_effect name="WalkSpeed" operation="perc_add" value="0.10"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_damage_up" name_key="lunar_damage_upName" description_key="lunar_damage_upDesc" icon="ui_game_symbol_lunar_damage_up">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="EntityDamage" operation="perc_add" value="0.05"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_loot_up" name_key="lunar_loot_upName" description_key="lunar_loot_upDesc" icon="ui_game_symbol_lunar_loot_up">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="LootProb" operation="perc_add" value="0.10"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_xp_down" name_key="lunar_xp_downName" description_key="lunar_xp_downDesc" icon="ui_game_symbol_lunar_xp_down">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="PlayerExpGain" operation="perc_add" value="-0.10"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_speed_down" name_key="lunar_speed_downName" description_key="lunar_speed_downDesc" icon="ui_game_symbol_lunar_speed_down">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="RunSpeed" operation="perc_add" value="-0.10"/>
+        <passive_effect name="WalkSpeed" operation="perc_add" value="-0.10"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_damage_down" name_key="lunar_damage_downName" description_key="lunar_damage_downDesc" icon="ui_game_symbol_lunar_damage_down">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="EntityDamage" operation="perc_add" value="-0.20"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_loot_down" name_key="lunar_loot_downName" description_key="lunar_loot_downDesc" icon="ui_game_symbol_lunar_loot_down">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="LootProb" operation="perc_add" value="-0.10"/>
+      </effect_group>
+    </buff>
+
+    <!-- ===== Благословенные луны ===== -->
+
+    <buff name="lunar_harvest" name_key="lunar_harvestName" description_key="lunar_harvestDesc" icon="ui_game_symbol_lunar_harvest">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="HarvestCount" operation="perc_add" value="0.50"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_craft" name_key="lunar_craftName" description_key="lunar_craftDesc" icon="ui_game_symbol_lunar_craft">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="CraftingTime" operation="perc_add" value="-0.30"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_trade" name_key="lunar_tradeName" description_key="lunar_tradeDesc" icon="ui_game_symbol_lunar_trade">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="BarteringBuying" operation="perc_add" value="0.10"/>
+        <passive_effect name="LootQuantity" operation="perc_add" value="0.20"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_travel" name_key="lunar_travelName" description_key="lunar_travelDesc" icon="ui_game_symbol_lunar_travel">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="VehicleFuelUsePer" operation="perc_add" value="-0.30"/>
+        <passive_effect name="StaminaLoss" operation="perc_add" value="-0.20"/>
+      </effect_group>
+    </buff>
+
+    <!-- ===== Проклятые луны ===== -->
+
+    <buff name="lunar_poverty" name_key="lunar_povertyName" description_key="lunar_povertyDesc" icon="ui_game_symbol_lunar_poverty">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="LootProb" operation="perc_add" value="-0.95"/>
+        <passive_effect name="BarteringBuying" operation="perc_add" value="-0.25"/>
+      </effect_group>
+    </buff>
+
+    <buff name="lunar_lazy" name_key="lunar_lazyName" description_key="lunar_lazyDesc" icon="ui_game_symbol_lunar_lazy">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+      <effect_group>
+        <passive_effect name="RunSpeed" operation="perc_add" value="-0.20"/>
+        <passive_effect name="WalkSpeed" operation="perc_add" value="-0.20"/>
+      </effect_group>
+    </buff>
+
+    <!-- ===== Особые луны с кодом (эффект в LunarEvents.dll) ===== -->
+
+    <buff name="lunar_wild" name_key="lunar_wildName" description_key="lunar_wildDesc" icon="ui_game_symbol_lunar_wild">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+    </buff>
+
+    <buff name="lunar_fatal" name_key="lunar_fatalName" description_key="lunar_fatalDesc" icon="ui_game_symbol_lunar_fatal">
+      <stack_type value="ignore"/>
+      <duration value="0"/>
+    </buff>
+
+  </append>
+</buffs>
