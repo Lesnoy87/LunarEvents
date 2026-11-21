@@ -4,7 +4,7 @@ using System.Reflection;
 using HarmonyLib;
 using UnityEngine;
 
-// LunarEvents 0.2.0 — фазы луны меняют геймплей.
+// LunarEvents 0.3.1 — фазы луны и дня меняют геймплей.
 // Ночь 22:00–04:00: на одной фазе баф, на противоположной — дебаф.
 // Раз за ночь может выпасть особая луна: благословенная или проклятая.
 // «Дикая» приводит стаи диких зомби, «Фатальная» делает зомби всевидящими и смертоносными.
@@ -14,7 +14,7 @@ public class LunarEventsMod : IModApi
     {
         new Harmony("lunarevents.server").PatchAll(Assembly.GetExecutingAssembly());
         LunarConfig.Load(_modInstance != null ? _modInstance.Path : null);
-        Debug.Log("[LunarEvents] initialized (0.3.0)");
+        Debug.Log("[LunarEvents] initialized (0.3.1)");
     }
 }
 

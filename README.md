@@ -168,4 +168,8 @@ powershell -File Source\build.ps1
 
 ## Лицензия
 
-MIT — см. `LICENSE`. Copyright (c) 2026 Lesnoy87.
+С версии **0.3.1** — **All Rights Reserved / source-available**, не MIT.
+Бесплатно играть и включать немодифицированный мод в бесплатные модпаки
+с указанием автора «Lesnoy87 / Lunar Events» можно; продажа, перезалив
+и изменение — нельзя. Полный текст: `LICENSE`, кратко по-русски:
+`LICENSE-RU.md`. Версии **0.3.0 и раньше** остаются под MIT.
