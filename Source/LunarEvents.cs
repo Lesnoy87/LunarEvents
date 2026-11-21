@@ -13,7 +13,8 @@ public class LunarEventsMod : IModApi
     public void InitMod(Mod _modInstance)
     {
         new Harmony("lunarevents.server").PatchAll(Assembly.GetExecutingAssembly());
-        Debug.Log("[LunarEvents] initialized (0.2.0)");
+        LunarConfig.Load(_modInstance != null ? _modInstance.Path : null);
+        Debug.Log("[LunarEvents] initialized (0.3.0)");
     }
 }
 
@@ -71,6 +72,10 @@ internal static class LunarCore
     private static float nextWildSpawn;
     private static float nextFatalAggro;
     private static float nextEnsure;
+    private static float nextZombieSpeed;
+    private static bool zombieSpeedActive;
+    private static bool parkourSaved;
+    private static float parkourSavedValue;
     private static bool loggedStartup;
     private static bool consoleChecked;
 
@@ -78,6 +83,7 @@ internal static class LunarCore
     private static int lastNightDay = int.MinValue;
     private static int lastPhase = -1;
     private static bool lastNight;
+    private static string lastDayId;
     private static string special;
 
     private static string forcedSpecial; // null — обычный ролл; "none" — принудительно без луны
@@ -93,16 +99,27 @@ internal static class LunarCore
     public static bool FatalActive { get; private set; }
     public static bool WildActive { get; private set; }
 
+    // Множитель расхода топлива для текущей фазы. Применяется в патче
+    // VPEngine.Update, т.к. стат VehicleFuelUsePer в этой сборке ведёт себя
+    // не как множитель (0 без бафа, -0.3 с бафом).
+    public static float FuelMultiplier()
+    {
+        if (lastNight && special == "lunar_travel") return 0.70f;
+        if (!lastNight && lastDayId == "fuel_up") return 0.75f;
+        if (!lastNight && lastDayId == "fuel_down") return 1.30f;
+        return 1f;
+    }
+
     private static readonly string[] BaseBuffs =
     {
         "lunar_xp_up",       // 0 — полнолуние
         "lunar_speed_up",    // 1
         "lunar_damage_up",   // 2
-        "lunar_loot_up",     // 3
+        "lunar_crit_up",     // 3
         "lunar_xp_down",     // 4 — новолуние
-        "lunar_speed_down",  // 5
+        "lunar_speed_down",  // 5 — маркер: зомби +10%
         "lunar_damage_down", // 6
-        "lunar_loot_down",   // 7
+        "lunar_crit_down",   // 7
     };
 
     private struct MoonEntry
@@ -184,6 +201,8 @@ internal static class LunarCore
         // иначе фаза и особая луна менялись бы посреди ночи.
         int nightDay = clock < NightEndHour ? day - 1 : day;
         int phase = forcedPhase >= 0 ? forcedPhase : ((nightDay % 8) + 8) % 8;
+        // Дневная фаза: 04:00–22:00, отдельный пул и свой «мешок».
+        string dayId = night ? null : LunarDay.ForDay(world, day);
 
         if (!loggedStartup)
         {
@@ -207,15 +226,20 @@ internal static class LunarCore
         FatalActive = night && special == "lunar_fatal";
         WildActive = night && special == "lunar_wild";
 
-        if (phase != lastPhase || night != lastNight)
+        if (phase != lastPhase || night != lastNight || dayId != lastDayId)
         {
+            bool dayChanged = dayId != lastDayId;
             lastPhase = phase;
             lastNight = night;
-            Apply(world, phase, night, special);
+            lastDayId = dayId;
+            Apply(world, phase, night, special, dayId);
+
+            if (!night && dayChanged && !string.IsNullOrEmpty(dayId))
+                Announce(dayId);
         }
 
-        EnsurePlayersTick(world, phase, night, special);
-        WildTick(world);
+        EnsurePlayersTick(world, phase, night, special, dayId);
+        ZombieSpeedTick(world, night && phase == 5);
         FatalTick(world);
 
         if (Time.time >= nextDiag)
@@ -224,6 +248,7 @@ internal static class LunarCore
             Debug.Log("[LunarEvents] diag day=" + day + " nightDay=" + nightDay +
                       " phase=" + phase + " clock=" + clock.ToString("0.00") +
                       " night=" + night + " special=" + (special ?? "none") +
+                      " dayPhase=" + (dayId ?? "none") +
                       " wild=" + WildActive + " fatal=" + FatalActive +
                       " wildAlive=" + AliveWild(world) + " players=" + world.Players.list.Count);
         }
@@ -235,6 +260,7 @@ internal static class LunarCore
         lastNightDay = int.MinValue;
         lastPhase = -1;
         lastNight = false;
+        lastDayId = null;
         special = null;
         forcedSpecial = null;
         forcedPhase = -1;
@@ -248,7 +274,12 @@ internal static class LunarCore
         nextWildSpawn = 0f;
         nextFatalAggro = 0f;
         nextEnsure = 0f;
+        nextZombieSpeed = 0f;
+        zombieSpeedActive = false;
+        parkourSaved = false;
+        parkourSavedValue = 0f;
         loggedStartup = false;
+        LunarDay.Invalidate();
     }
 
     private static float Clock(World world)
@@ -278,7 +309,7 @@ internal static class LunarCore
 
     // Детерминированный ролл: луна зависит от сида мира и игрового дня,
     // поэтому перезапуск игры не меняет ночь.
-    private static uint Hash(int seed, int day, int salt)
+    internal static uint Hash(int seed, int day, int salt)
     {
         unchecked
         {
@@ -295,24 +326,69 @@ internal static class LunarCore
         return (Hash(world.Seed, day, salt) % 1000000u) / 1000000f;
     }
 
-    private static void Apply(World world, int phase, bool night, string specialBuff)
+    private static void Apply(World world, int phase, bool night, string specialBuff, string dayId)
     {
         List<EntityPlayer> players = Players(world);
         for (int i = 0; i < players.Count; i++)
         {
             EntityPlayer p = players[i];
             if (p == null || p.Buffs == null) continue;
-            ApplyTo(p, phase, night, specialBuff);
+            ApplyTo(p, phase, night, specialBuff, dayId);
         }
     }
 
-    // Страховка: игрок мог зайти ночью или возродиться после смерти —
+    // Уведомление о смене фазы: всплывающая подсказка игры (ShowTooltipMP),
+    // а не строка в чате. Если API недоступен — откат в чат.
+    private static void Announce(string dayId)
+    {
+        GameManager gm = GameManager.Instance;
+        World world = gm != null ? gm.World : null;
+        if (gm == null || world == null) return;
+
+        string name = LunarDay.DisplayName(dayId);
+        if (string.IsNullOrEmpty(name)) name = dayId;
+
+        string desc = LunarDay.DisplayDescription(dayId);
+        List<EntityPlayer> players = Players(world);
+
+        bool shown = false;
+        for (int i = 0; i < players.Count; i++)
+        {
+            EntityPlayer p = players[i];
+            if (p == null) continue;
+            try
+            {
+                GameManager.ShowTooltipMP(p, name, desc);
+                shown = true;
+            }
+            catch (Exception e)
+            {
+                Debug.LogWarning("[LunarEvents] tooltip failed: " + e.Message);
+            }
+        }
+        if (shown) return;
+
+        string msg = "[Lunar Events] " + name +
+                     (string.IsNullOrEmpty(desc) ? "" : " — " + desc);
+        try
+        {
+            gm.ChatMessageServer(null, EChatType.Global, -1, msg, null,
+                EMessageSender.Server, GeneratedTextManager.BbCodeSupportMode.Supported);
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning("[LunarEvents] chat announce failed: " + e.Message);
+        }
+    }
+
+    // Страховка: игрок мог зайти днём/ночью или возродиться после смерти —
     // догоняем его баффами, не дожидаясь смены фазы.
-    private static void EnsurePlayersTick(World world, int phase, bool night, string specialBuff)
+    private static void EnsurePlayersTick(World world, int phase, bool night, string specialBuff, string dayId)
     {
         if (Time.time < nextEnsure) return;
         nextEnsure = Time.time + 5f;
 
+        string wantDay = night ? null : LunarDay.BuffFor(dayId);
         List<EntityPlayer> players = Players(world);
         for (int i = 0; i < players.Count; i++)
         {
@@ -320,11 +396,7 @@ internal static class LunarCore
             if (p == null || p.Buffs == null) continue;
 
             bool ok;
-            if (!night)
-            {
-                ok = !HasAnyLunarBuff(p);
-            }
-            else
+            if (night)
             {
                 ok = p.Buffs.HasBuff(BaseBuffs[phase]);
                 for (int m = 0; m < SpecialMoons.Length && ok; m++)
@@ -332,13 +404,22 @@ internal static class LunarCore
                     bool expected = SpecialMoons[m].Buff == specialBuff;
                     if (p.Buffs.HasBuff(SpecialMoons[m].Buff) != expected) ok = false;
                 }
+                if (ok && DayBuffCount(p) > 0) ok = false;
+            }
+            else
+            {
+                int dayCount = DayBuffCount(p);
+                if (wantDay == null)
+                    ok = !HasNightBuff(p) && dayCount == 0;
+                else
+                    ok = p.Buffs.HasBuff(wantDay) && !HasNightBuff(p) && dayCount == 1;
             }
 
-            if (!ok) ApplyTo(p, phase, night, specialBuff);
+            if (!ok) ApplyTo(p, phase, night, specialBuff, dayId);
         }
     }
 
-    private static bool HasAnyLunarBuff(EntityPlayer p)
+    private static bool HasNightBuff(EntityPlayer p)
     {
         for (int i = 0; i < BaseBuffs.Length; i++)
             if (p.Buffs.HasBuff(BaseBuffs[i])) return true;
@@ -347,6 +428,15 @@ internal static class LunarCore
             if (p.Buffs.HasBuff(SpecialMoons[i].Buff)) return true;
 
         return false;
+    }
+
+    private static int DayBuffCount(EntityPlayer p)
+    {
+        int count = 0;
+        string[] ids = LunarDay.AllIds;
+        for (int i = 0; i < ids.Length; i++)
+            if (p.Buffs.HasBuff("lunar_day_" + ids[i])) count++;
+        return count;
     }
 
     private static List<EntityPlayer> Players(World world)
@@ -368,28 +458,36 @@ internal static class LunarCore
         return result;
     }
 
-    private static void ApplyTo(EntityPlayer p, int phase, bool night, string specialBuff)
+    private static void ApplyTo(EntityPlayer p, int phase, bool night, string specialBuff, string dayId)
     {
         Debug.Log("[LunarEvents] apply phase=" + phase + " night=" + night +
-                  " to=" + p.EntityName);
+                  " day=" + (dayId ?? "none") + " to=" + p.EntityName);
         Clear(p);
-        if (!night) return;
+        if (night)
+        {
+            Add(p, BaseBuffs[phase]);
+            if (!string.IsNullOrEmpty(specialBuff)) Add(p, specialBuff);
+            return;
+        }
 
-        Add(p, BaseBuffs[phase]);
-        if (!string.IsNullOrEmpty(specialBuff)) Add(p, specialBuff);
+        string dayBuff = LunarDay.BuffFor(dayId);
+        if (dayBuff != null) Add(p, dayBuff);
     }
 
     private static void Clear(EntityPlayer p)
     {
         for (int i = 0; i < BaseBuffs.Length; i++) RemoveIfPresent(p, BaseBuffs[i]);
         for (int i = 0; i < SpecialMoons.Length; i++) RemoveIfPresent(p, SpecialMoons[i].Buff);
+        for (int i = 0; i < LunarDay.AllIds.Length; i++)
+            RemoveIfPresent(p, "lunar_day_" + LunarDay.AllIds[i]);
     }
 
     private static void RemoveIfPresent(EntityPlayer p, string name)
     {
         if (!p.Buffs.HasBuff(name)) return;
         Debug.Log("[LunarEvents] remove " + name);
-        p.Buffs.RemoveBuff(name, -1, false);
+        // true — снятие уходит клиентам, иначе иконка и пассивка остаются.
+        p.Buffs.RemoveBuff(name, -1, true);
     }
 
     private static void Add(EntityPlayer p, string name)
@@ -557,6 +655,35 @@ internal static class LunarCore
         return alive;
     }
 
+    // ===== Фаза 5: зомби быстрее на 10% =====
+    // Игроку выдается только маркер lunar_speed_down, реальную скорость
+    // получают зомби скрытым баффом. Новые спавны догоняются раз в 2 с.
+    private static void ZombieSpeedTick(World world, bool active)
+    {
+        if (!active && !zombieSpeedActive) return;
+        if (Time.time < nextZombieSpeed) return;
+        nextZombieSpeed = Time.time + 2f;
+
+        List<Entity> entities = world.Entities.list;
+        for (int i = 0; i < entities.Count; i++)
+        {
+            EntityZombie z = entities[i] as EntityZombie;
+            if (z == null || z.IsDead() || z.Buffs == null) continue;
+
+            if (active)
+            {
+                if (!z.Buffs.HasBuff("lunar_zombie_speed"))
+                    z.Buffs.AddBuff("lunar_zombie_speed", -1, true);
+            }
+            else if (z.Buffs.HasBuff("lunar_zombie_speed"))
+            {
+                z.Buffs.RemoveBuff("lunar_zombie_speed", -1, true);
+            }
+        }
+
+        zombieSpeedActive = active;
+    }
+
     // ===== «Фатальная луна»: зомби чуют игрока и бьют насмерть =====
 
     private static void FatalTick(World world)
@@ -640,9 +767,164 @@ internal static class LunarCore
                " special=" + (special ?? "none") +
                " forced=" + (forcedSpecial ?? "-") +
                " phaseOverride=" + (forcedPhase >= 0 ? forcedPhase.ToString() : "auto") +
+               " dayPhase=" + (lastDayId ?? "none") +
+               " dayBuff=" + (LunarDay.BuffFor(lastDayId) ?? "-") +
+               " dayForced=" + (LunarDay.ForcedId() ?? "auto") +
+               " dayEnabled=" + LunarDay.Enabled +
+               " bloodToday=" + LunarDay.BloodMoonToday() +
+               " recovery=" + LunarDay.RecoveryDay() +
                " wild=" + WildActive +
                " fatal=" + FatalActive +
                " wildAlive=" + AliveWild(world);
+    }
+
+    public static string DayListText()
+    {
+        return "Day phases: " + LunarDay.ListIds();
+    }
+
+    // Диагностика для проверки фаз без прыжков: видно, какие баффы висят
+    // и какой модификатор падения получился.
+    public static string StatText()
+    {
+        GameManager gm = GameManager.Instance;
+        World world = gm != null ? gm.World : null;
+        if (world == null) return "LunarEvents: no world loaded";
+
+        List<EntityPlayer> players = Players(world);
+        if (players.Count == 0) return "LunarEvents: no player";
+
+        EntityPlayer p = players[0];
+        float parkour = p.Buffs != null ? p.Buffs.GetCustomVar("$parkourBonus") : 0f;
+        object fall = MemberDeep(p, "FallDamageModifier");
+
+        EntityVehicle veh = p.AttachedToEntity as EntityVehicle;
+        string vehicleText = "none";
+        if (veh != null && veh.vehicle != null)
+        {
+            float fuel = veh.vehicle.GetFuelLevel();
+            float max = veh.vehicle.GetMaxFuelLevel();
+            vehicleText = fuel.ToString("0.0") + "/" + max.ToString("0.0") +
+                          " kmPerL=" + EngineFuelKmPerL(veh.vehicle).ToString("0.00") +
+                          " lunarX=" + FuelMultiplier().ToString("0.00");
+        }
+        string fallText = fall is float ? ((float)fall).ToString("0.000") :
+                          (fall != null ? fall.ToString() : "?");
+
+        return "LunarEvents stat: player=" + p.EntityName +
+               " night=" + lastNight + " phase=" + lastPhase +
+               " dayPhase=" + (lastDayId ?? "none") +
+               " parkourBonus=" + parkour.ToString("0.00") +
+               " fallDamageModifier=" + fallText +
+               " vehicleFuel=" + vehicleText +
+               " critUp=" + (p.Buffs != null && p.Buffs.HasBuff("lunar_crit_up")) +
+               " critDown=" + (p.Buffs != null && p.Buffs.HasBuff("lunar_crit_down")) +
+               " zombieMarker=" + (p.Buffs != null && p.Buffs.HasBuff("lunar_speed_down"));
+    }
+
+    // Только для теста падения: временно убирает защиту паркура.
+    public static string ParkourDebug(string mode)
+    {
+        GameManager gm = GameManager.Instance;
+        World world = gm != null ? gm.World : null;
+        if (world == null) return "No world loaded";
+
+        List<EntityPlayer> players = Players(world);
+        if (players.Count == 0) return "No player";
+        EntityPlayer p = players[0];
+        if (p.Buffs == null) return "Player has no buffs";
+
+        string m = (mode ?? "").Trim().ToLowerInvariant();
+        if (m == "off")
+        {
+            if (!parkourSaved)
+            {
+                parkourSavedValue = p.Buffs.GetCustomVar("$parkourBonus");
+                parkourSaved = true;
+            }
+            p.SetCVar("$parkourBonus", 0f);
+            float now = p.Buffs.GetCustomVar("$parkourBonus");
+            return "Parkour fall protection OFF for tests (was " +
+                   parkourSavedValue.ToString("0.00") + ", now " + now.ToString("0.00") +
+                   "). Use: le parkour on";
+        }
+
+        if (m == "on")
+        {
+            float v = parkourSaved ? parkourSavedValue : 0.9f;
+            p.SetCVar("$parkourBonus", v);
+            parkourSaved = false;
+            return "Parkour fall protection restored: " + v.ToString("0.00") +
+                   " (now " + p.Buffs.GetCustomVar("$parkourBonus").ToString("0.00") + ")";
+        }
+
+        return "parkourBonus=" + p.Buffs.GetCustomVar("$parkourBonus").ToString("0.00") +
+               ". Usage: le parkour off | on";
+    }
+
+    // Расчёт расхода топлива без траты: та же формула, что в VPEngine.Update.
+    // effectFuel — множитель от баффов (1.0 без эффекта, 0.7 при -30%).
+    public static string FuelTest(int meters)
+    {
+        GameManager gm = GameManager.Instance;
+        World world = gm != null ? gm.World : null;
+        if (world == null) return "No world loaded";
+
+        List<EntityPlayer> players = Players(world);
+        if (players.Count == 0) return "No player";
+
+        EntityPlayer p = players[0];
+        EntityVehicle veh = p.AttachedToEntity as EntityVehicle;
+        if (veh == null || veh.vehicle == null)
+            return "Sit on a vehicle first";
+
+        meters = Mathf.Clamp(meters, 10, 5000);
+        float kmPerL = EngineFuelKmPerL(veh.vehicle);
+        float mult = FuelMultiplier();
+
+        if (kmPerL <= 0f)
+            return "Engine fuelKmPerL not found";
+
+        float used = meters / (kmPerL * 1000f) * mult;
+
+        return "Fuel test: " + meters + " m, kmPerL=" + kmPerL.ToString("0.00") +
+               " lunarX=" + mult.ToString("0.00") +
+               " => used=" + used.ToString("0.00") +
+               " (turbo x2=" + (used * 2f).ToString("0.00") + ")";
+    }
+
+    private static float EngineFuelKmPerL(Vehicle vehicle)
+    {
+        List<VehiclePart> parts = vehicle.vehicleParts;
+        for (int i = 0; i < parts.Count; i++)
+        {
+            object part = parts[i];
+            if (part == null || part.GetType().Name != "VPEngine") continue;
+
+            FieldInfo f = part.GetType().GetField("fuelKmPerL",
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+            if (f != null) return Convert.ToSingle(f.GetValue(part));
+        }
+        return 0f;
+    }
+
+    public static string SetDayPhase(string raw)
+    {
+        string s = (raw ?? "").Trim().ToLowerInvariant();
+        if (s != "auto" && s != "off" && s != "neutral" && s != "none" && !LunarDay.HasId(s))
+            return "Unknown day phase '" + raw + "'. Use: " + LunarDay.ListIds() + ", neutral, auto";
+
+        LunarDay.SetForced(s);
+        lastDayId = null;
+        return "Day phase: " + (LunarDay.ForcedId() ?? "auto");
+    }
+
+    public static string SetDayEnabled(bool on)
+    {
+        LunarDay.Enabled = on;
+        LunarDay.Invalidate();
+        lastDayId = null;
+        return "Daytime phases: " + (on ? "on" : "off");
     }
 
     public static string SetSpecial(string raw)
@@ -704,6 +986,25 @@ internal static class LunarCore
         return "Phase forced: " + phase;
     }
 
+    // Ищет поле/свойство по всей иерархии типов, включая приватные поля
+    // базовых классов (FallDamageModifier объявлен не на самом EntityPlayer).
+    private static object MemberDeep(object target, string name)
+    {
+        if (target == null) return null;
+
+        for (Type t = target.GetType(); t != null; t = t.BaseType)
+        {
+            FieldInfo f = t.GetField(name,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
+            if (f != null) return f.GetValue(target);
+
+            PropertyInfo p = t.GetProperty(name,
+                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static | BindingFlags.DeclaredOnly);
+            if (p != null) return p.GetValue(target, null);
+        }
+        return null;
+    }
+
     private static string NormalizeMoon(string raw)
     {
         string s = (raw ?? "").Trim().ToLowerInvariant();
@@ -724,18 +1025,21 @@ public class ConsoleCmdLunarEvents : ConsoleCmdAbstract
 
     public override string[] getCommands()
     {
-        return new[] { "lunarevents", "le" };
+        // "le" занят ванильной командой listentities — не перехватываем.
+        return new[] { "lunarevents", "lunar" };
     }
 
     public override string getDescription()
     {
-        return "Lunar Events: status, set <moon>, clear, spawn [n], phase <0-7|auto>";
+        return "Lunar Events (alias: lunar): status, set <moon>, clear, spawn [n], phase <0-7|auto>, day <list|set|on|off>, stat, parkour <off|on>, fueltest [m]";
     }
 
     public override string getHelp()
     {
         return "lunarevents status | set <harvest|craft|trade|travel|poverty|lazy|wild|fatal|none> | " +
-               "clear | spawn [1-20] | phase <0-7|auto>";
+               "clear | spawn [1-20] | phase <0-7|auto> | " +
+               "day <list | set <id|neutral|auto> | on | off> | " +
+               "stat | parkour <off|on> | fueltest [10-5000]";
     }
 
     public override void Execute(List<string> _params, CommandSenderInfo _senderInfo)
@@ -785,9 +1089,153 @@ public class ConsoleCmdLunarEvents : ConsoleCmdAbstract
                 console.Output(LunarCore.SetPhase(_params[1]));
                 break;
 
+            case "day":
+                if (_params.Count < 2)
+                {
+                    console.Output(LunarCore.DayListText());
+                    return;
+                }
+
+                string daySub = (_params[1] ?? "").ToLowerInvariant();
+                if (daySub == "list")
+                {
+                    console.Output(LunarCore.DayListText());
+                }
+                else if (daySub == "on")
+                {
+                    console.Output(LunarCore.SetDayEnabled(true));
+                }
+                else if (daySub == "off")
+                {
+                    console.Output(LunarCore.SetDayEnabled(false));
+                }
+                else if (daySub == "set")
+                {
+                    if (_params.Count < 3)
+                    {
+                        console.Output("Usage: lunarevents day set <id|neutral|auto>");
+                        return;
+                    }
+                    console.Output(LunarCore.SetDayPhase(_params[2]));
+                }
+                else
+                {
+                    console.Output("Unknown day subcommand. " + GetHelp());
+                }
+                break;
+
+            case "stat":
+                console.Output(LunarCore.StatText());
+                break;
+
+            case "parkour":
+                console.Output(LunarCore.ParkourDebug(_params.Count >= 2 ? _params[1] : ""));
+                break;
+
+            case "fueltest":
+                int testMeters = 1000;
+                if (_params.Count >= 2) int.TryParse(_params[1], out testMeters);
+                console.Output(LunarCore.FuelTest(testMeters));
+                break;
+
             default:
                 console.Output("Unknown subcommand. " + GetHelp());
                 break;
         }
+    }
+}
+
+// «Дикая луна»: все появляющиеся зомби — минимум дикие (feral).
+// Меняем класс до создания сущности, иначе feral-статы не применятся.
+internal static class WildFeral
+{
+    public static void Fix(ref int classId)
+    {
+        if (!LunarCore.WildActive || classId < 0) return;
+
+        try
+        {
+            EntityClass ec = EntityClass.GetEntityClass(classId);
+            if (ec == null || ec.classname == null) return;
+            if (!typeof(EntityZombie).IsAssignableFrom(ec.classname)) return;
+
+            string name = ec.entityClassName;
+            if (string.IsNullOrEmpty(name)) return;
+            if (name.EndsWith("Feral", StringComparison.OrdinalIgnoreCase)) return;
+
+            int feral = EntityClass.GetId(name + "Feral");
+            if (feral >= 0) classId = feral;
+        }
+        catch
+        {
+            // Неизвестный класс — оставляем как есть, спавн не ломаем.
+        }
+    }
+}
+
+[HarmonyPatch(typeof(EntityFactory), "CreateEntity", new Type[] { typeof(EntityCreationData) })]
+internal static class WildFeralEcdPatch
+{
+    private static void Prefix(EntityCreationData __0)
+    {
+        if (__0 != null) WildFeral.Fix(ref __0.entityClass);
+    }
+}
+
+[HarmonyPatch(typeof(EntityFactory), "CreateEntity", new Type[] { typeof(int), typeof(Vector3) })]
+internal static class WildFeral2Patch
+{
+    private static void Prefix(ref int __0)
+    {
+        WildFeral.Fix(ref __0);
+    }
+}
+
+[HarmonyPatch(typeof(EntityFactory), "CreateEntity", new Type[] { typeof(int), typeof(Vector3), typeof(Vector3) })]
+internal static class WildFeral3Patch
+{
+    private static void Prefix(ref int __0)
+    {
+        WildFeral.Fix(ref __0);
+    }
+}
+
+[HarmonyPatch(typeof(EntityFactory), "CreateEntity", new Type[] { typeof(int), typeof(int), typeof(Vector3), typeof(Vector3) })]
+internal static class WildFeral4Patch
+{
+    private static void Prefix(ref int __0)
+    {
+        WildFeral.Fix(ref __0);
+    }
+}
+
+[HarmonyPatch(typeof(EntityFactory), "CreateEntity", new Type[] { typeof(int), typeof(Vector3), typeof(Vector3), typeof(int), typeof(string) })]
+internal static class WildFeral5Patch
+{
+    private static void Prefix(ref int __0)
+    {
+        WildFeral.Fix(ref __0);
+    }
+}
+
+// Расход топлива: множитель фазы применяется прямо в VPEngine.Update,
+// потому что стат VehicleFuelUsePer в этой сборке не работает как множитель.
+[HarmonyPatch(typeof(VPEngine), "Update")]
+internal static class FuelUsePatch
+{
+    private static void Prefix(VPEngine __instance, out float __state)
+    {
+        __state = float.NaN;
+        if (__instance == null || __instance.vehicle == null) return;
+
+        __state = __instance.vehicle.EffectFuelUsePer;
+        __instance.vehicle.EffectFuelUsePer = __state * LunarCore.FuelMultiplier();
+    }
+
+    private static void Postfix(VPEngine __instance, float __state)
+    {
+        if (float.IsNaN(__state)) return;
+        if (__instance != null && __instance.vehicle != null)
+            __instance.vehicle.EffectFuelUsePer = __state;
     }
 }

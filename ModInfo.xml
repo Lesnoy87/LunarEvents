@@ -2,9 +2,9 @@
 <xml>
   <Name value="LunarEvents" />
   <DisplayName value="Lunar Events" />
-  <Description value="Moon phases change gameplay: buffs on one phase, debuffs on the opposite. Rare blessed and cursed moons; the Wild Moon sends packs of feral zombies, the Fatal Moon makes zombies omniscient and deadly. Server-side. | Фазы луны влияют на игру: на одной фазе баф, на противоположной — дебаф. Редкие благословенные и проклятые луны; «Дикая» приводит стаи диких зомби, «Фатальная» делает зомби всевидящими и смертоносными. Серверный мод." />
-  <Author value="DifRUST" />
-  <Version value="0.2.0" />
-  <Website value="https://github.com/Lesnoy87" />
+  <Description value="Moon phases change gameplay: buffs on one phase, debuffs on the opposite. Rare blessed and cursed moons; the Wild Moon makes every zombie spawn feral, the Fatal Moon makes zombies omniscient and deadly. Daytime phases add trade/craft/loot/travel modifiers from 04:00 to 22:00. Server-side. | Фазы луны влияют на игру: на одной фазе баф, на противоположной — дебаф. Редкие благословенные и проклятые луны; «Дикая» делает все спавны зомби дикими, «Фатальная» делает зомби всевидящими и смертоносными. Дневные фазы с 04:00 до 22:00 добавляют модификаторы торговли, крафта, лута и транспорта. Серверный мод." />
+  <Author value="Lesnoy87" />
+  <Version value="0.3.0" />
+  <Website value="https://github.com/Lesnoy87/LunarEvents" />
   <SkipWithAntiCheat value="true" />
 </xml>
