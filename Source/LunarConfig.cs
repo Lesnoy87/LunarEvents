@@ -8,6 +8,10 @@ using UnityEngine;
 // битый, остаются значения по умолчанию; мод не падает.
 internal static class LunarConfig
 {
+    // Диагностика в лог (строка раз в 10 с). По умолчанию выключена:
+    // в 0.3.1 она писала ~1200 строк в час и мешала читать лог.
+    public static bool Diag;
+
     public static void Load(string modPath)
     {
         if (string.IsNullOrEmpty(modPath)) return;
@@ -20,6 +24,9 @@ internal static class LunarConfig
             XmlDocument doc = new XmlDocument();
             doc.Load(path);
 
+            XmlNode log = doc.SelectSingleNode("/LunarEvents/Log");
+            if (log != null) Diag = ReadBool(log, "diag", Diag);
+
             XmlNode day = doc.SelectSingleNode("/LunarEvents/Day");
             if (day == null) return;
 
@@ -30,7 +37,8 @@ internal static class LunarConfig
                 LunarDay.RareChance = Mathf.Clamp01(pct / 100f);
 
             Debug.Log("[LunarEvents] config: day=" + LunarDay.Enabled +
-                      " rare=" + LunarDay.RareChance.ToString("0.00"));
+                      " rare=" + LunarDay.RareChance.ToString("0.00") +
+                      " diag=" + Diag);
         }
         catch (Exception e)
         {
