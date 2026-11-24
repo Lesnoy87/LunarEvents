@@ -14,7 +14,9 @@ public class LunarEventsMod : IModApi
     {
         new Harmony("lunarevents.server").PatchAll(Assembly.GetExecutingAssembly());
         LunarConfig.Load(_modInstance != null ? _modInstance.Path : null);
-        Debug.Log("[LunarEvents] initialized (0.3.2)");
+        LunarAdminPanel.Reload();
+        LunarAdminPanel.Create();
+        Debug.Log("[LunarEvents] initialized (0.4.0)");
     }
 }
 
@@ -292,12 +294,19 @@ internal static class LunarCore
 
     private static string RollSpecial(World world, int nightDay)
     {
+        return SpecialForNight(world.Seed, nightDay);
+    }
+
+    // Та же ночь, но без World: нужно клиентским модам (DifRUST), чтобы
+    // показать вторую луну на особой ночи, даже если клиент не сервер.
+    internal static string SpecialForNight(int seed, int nightDay)
+    {
         if (forcedSpecial != null)
             return forcedSpecial == "none" ? null : forcedSpecial;
 
-        if (Random01(world, nightDay, 101) >= SpecialChance) return null;
+        if (Random01(seed, nightDay, 101) >= SpecialChance) return null;
 
-        int roll = (int)(Hash(world.Seed, nightDay, 211) % 100u);
+        int roll = (int)(Hash(seed, nightDay, 211) % 100u);
         int acc = 0;
         for (int i = 0; i < SpecialMoons.Length; i++)
         {
@@ -321,9 +330,9 @@ internal static class LunarCore
         }
     }
 
-    private static float Random01(World world, int day, int salt)
+    private static float Random01(int seed, int day, int salt)
     {
-        return (Hash(world.Seed, day, salt) % 1000000u) / 1000000f;
+        return (Hash(seed, day, salt) % 1000000u) / 1000000f;
     }
 
     private static void Apply(World world, int phase, bool night, string specialBuff, string dayId)
